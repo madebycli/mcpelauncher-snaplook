@@ -1,8 +1,12 @@
-name: CMake
+name: Build and Release
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
+
+permissions:
+  contents: write
 
 env:
   BUILD_TYPE: Release
@@ -13,33 +17,57 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        abi: ["x86_64", "arm64-v8a" ]
-        include:
-        - abi: x86_64
-          ndktarget: x86_64-linux-android-
-        - abi: arm64-v8a
-          openssltarget: android-arm64
-          ndktarget: aarch64-linux-android-
+        abi: [x86_64, arm64-v8a]
+
     steps:
-    - run: sudo apt update && sudo apt install llvm gcc ninja-build
-    - uses: actions/checkout@v3
-      with:
-        submodules: 'true'
-    - uses: nttld/setup-ndk@v1
-      id: setup-ndk
-      with:
-        ndk-version: r27c
-        add-to-path: true
-    - uses: actions/checkout@v2
-     
- 
-    - name: Configure
-      run: cmake -B ${{github.workspace}}/build -G Ninja -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_TOOLCHAIN_FILE=${{ steps.setup-ndk.outputs.ndk-path }}/build/cmake/android.toolchain.cmake -DANDROID_ABI=${{ matrix.abi }} "-DCMAKE_C_FLAGS=-Wl,--strip-all"
-    - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} --target mcpelaunchersnaplook
-    
-    - uses: actions/upload-artifact@v4
-      with:
-        name: snaplook-${{format('android-{0}', matrix.abi)}}
-        path: |
-          build/libmcpelaunchersnaplook.so
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y llvm gcc ninja-build
+
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          add-to-path: true
+
+      - name: Configure
+        run: >
+          cmake -B "${{ github.workspace }}/build" -G Ninja
+          -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}"
+          -DCMAKE_TOOLCHAIN_FILE="${{ steps.setup-ndk.outputs.ndk-path }}/build/cmake/android.toolchain.cmake"
+          -DANDROID_ABI="${{ matrix.abi }}"
+          "-DCMAKE_C_FLAGS=-Wl,--strip-all"
+
+      - name: Build
+        run: cmake --build "${{ github.workspace }}/build" --config "${{ env.BUILD_TYPE }}" --target mcpelaunchersnaplook
+
+      - name: Prepare architecture-specific binary
+        run: cp build/libmcpelaunchersnaplook.so "build/libmcpelaunchersnaplook-${{ matrix.abi }}.so"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snaplook-${{ matrix.abi }}
+          path: build/libmcpelaunchersnaplook-${{ matrix.abi }}.so
+          if-no-files-found: error
+
+  release:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release-back]') }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: snaplook-*
+          path: release
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.21.80-back release/libmcpelaunchersnaplook-*.so \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Snaplook Third-Person Back (1.21.80)" \
+            --notes "Hold the configured snaplook key to switch temporarily to third-person back view. Includes x86_64 and arm64-v8a mcpelauncher libraries."
