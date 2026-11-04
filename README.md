@@ -1,6 +1,6 @@
 # mcpelauncher-snaplook
 
-A mod for mcpelauncher that adds snaplook (quickly hold a key to switch to third person front POV).
+A mod for mcpelauncher that adds snaplook (quickly hold a key to switch to third person back POV).
 
 ## Usage
 
